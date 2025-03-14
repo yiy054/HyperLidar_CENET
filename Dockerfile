@@ -12,26 +12,22 @@ RUN apt-get update && apt-get install -y \
 
 # Clone CENet repository
 WORKDIR /root
-RUN git clone --depth=1 https://github.com/huixiancheng/CENet
-
+# RUN git clone --depth=1 https://github.com/yiy054/CENet
+COPY . .
+RUN ls 
 # Set working directory
 WORKDIR /root/CENet
-
-COPY . .
+RUN ls 
 # Create and activate a Python virtual environment
-RUN python3 -m venv cenet_env && \
-    . cenet_env/bin/activate && \
-    pip install --upgrade pip
+RUN pip install --upgrade pip
 
 # Install Python dependencies
-RUN . cenet_env/bin/activate && \
-    pip install -r requirements_cenet.txt
-
-RUN . cenet_env/bin/activate && \
+RUN pip install -r requirements_cenet.txt \
     pip install requests PyYaml==3.12 \
-    pip install --upgrade pip wheel setuptools requests \
     pip install tensorboard==2.12.0 protobuf==3.20.3 
 # git clone https://github.com/vacancy/Synchronized-BatchNorm-PyTorch common
+#     pip install --upgrade pip wheel setuptools requests \
+
 
 # Ensure the virtual environment is activated on login
 RUN echo "source /root/CENet/cenet_env/bin/activate" >> /root/.bashrc

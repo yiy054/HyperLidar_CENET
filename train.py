@@ -8,6 +8,8 @@ import yaml
 import os
 from modules.trainer import Trainer
 
+import collections.abc
+collections.Hashable = collections.abc.Hashable
 
 if __name__ == '__main__':
 
