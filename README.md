@@ -35,8 +35,14 @@ Download SemanticKITTI from [official web](http://www.semantic-kitti.org/dataset
 ## Usage：
 ### Train：
 - SemanticKITTI:
-
-    `python train.py -d /your_dataset -ac config/arch/senet-512.yml -n senet-512`
+    ` sudo docker run -it --rm \              
+  --runtime nvidia --gpus all \
+  -v "$(pwd)/CENet:/root/CENet" \
+  --name test_container \
+  dustynv/l4t-pytorch:r36.2.0 \
+  bash`
+    `python3 train.py -d /root/CENet/dense_dataset_semantic/ -ac config/arch/senet-512.yml -n senet-512`
+    `python3 train.py -d /root/CENet/nuscenes_kitti/ -ac config/arch/senet-512.yml -n nuscenes`
 
     Note that the following training strategy is used due to GPU and time constraints, see [kitti.sh](https://github.com/huixiancheng/SENet/blob/main/kitti.sh) for details.
 
