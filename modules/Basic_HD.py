@@ -1,0 +1,306 @@
+from __future__ import print_function
+
+import os
+import copy
+import numpy as np
+import sys
+import argparse
+import time
+import torch
+import torch.nn.functional as F
+from tqdm import tqdm
+from modules.HDC_utils import set_model
+from modules.ioueval import *
+import torch.backends.cudnn as cudnn
+from postproc.KNN import KNN
+from common.avgmeter import *
+
+
+from torchhd import functional
+from torchhd import embeddings
+
+import torch.nn as nn
+
+
+VAL_CNT = 10
+
+class BasicHD():
+    def __init__(self, ARCH, DATA, datadir, logdir, modeldir, split,
+                logger):
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # tensorboard
+        self.logger = logger
+
+        self.ARCH = ARCH
+        self.DATA = DATA
+        self.datadir = datadir
+        self.logdir = logdir
+        self.modeldir = modeldir
+        self.split = split
+        self.epochs = 10
+
+        from dataset.kitti.parser import Parser
+        self.parser = Parser(root=self.datadir,
+                                        train_sequences=self.DATA["split"]["train"],
+                                        valid_sequences=self.DATA["split"]["valid"],
+                                        test_sequences=self.DATA["split"]["test"],
+                                        labels=self.DATA["labels"],
+                                        color_map=self.DATA["color_map"],
+                                        learning_map=self.DATA["learning_map"],
+                                        learning_map_inv=self.DATA["learning_map_inv"],
+                                        sensor=self.ARCH["dataset"]["sensor"],
+                                        max_points=self.ARCH["dataset"]["max_points"],
+                                        batch_size=6,
+                                        workers=self.ARCH["train"]["workers"],
+                                        gt=True,
+                                        shuffle_train=False)
+        self.num_classes = self.parser.get_n_classes() 
+        epsilon_w = self.ARCH["train"]["epsilon_w"]
+        content = torch.zeros(self.parser.get_n_classes(), dtype=torch.float)
+        for cl, freq in DATA["content"].items():
+            x_cl = self.parser.to_xentropy(cl)  # map actual class to xentropy class
+            content[x_cl] += freq
+        self.loss_w = 1 / (content + epsilon_w)  # get weights
+        for x_cl, w in enumerate(self.loss_w):  # ignore the ones necessary to ignore
+            if DATA["learning_ignore"][x_cl]:
+                # don't weigh
+                self.loss_w[x_cl] = 0
+        print("Loss weights from content: ", self.loss_w.data)
+
+        # build model and criterion
+        # self.model = model
+        # concatenate the encoder and the head
+        self.model = set_model(ARCH, modeldir, 'rp', 0, 0, self.num_classes, self.device)
+        print(self.parser.get_n_classes())
+        self.post = None
+        if self.ARCH["post"]["KNN"]["use"]:
+            self.post = KNN(self.ARCH["post"]["KNN"]["params"],
+                            self.parser.get_n_classes())
+        print(self.parser.get_n_classes())
+
+        # GPU?
+        self.gpu = False
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print("Infering in device: ", self.device)
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            cudnn.benchmark = True
+            cudnn.fastest = True
+            self.gpu = True
+            self.model.cuda()
+
+    def start(self):
+        self.model.eval()
+        self.ignore_class = []
+        for i, w in enumerate(self.loss_w):
+            if w < 1e-10:
+                self.ignore_class.append(i)
+                print("Ignoring class ", i, " in IoU evaluation")
+        self.evaluator = iouEval(self.parser.get_n_classes(),
+                                 self.device, self.ignore_class)
+        for e in range(1, 2):
+            time1 = time.time()
+            self.train(self.parser.get_train_set(), self.model, self.logger)
+            time2 = time.time()
+            print('train epoch {}, total time {:.2f}'.format(e, time2 - time1))
+            acc = self.validate(self.parser.get_valid_set(), self.model, self.evaluator)
+            print('Stream final acc: {}'.format(acc))
+        for epoch in range(1, self.epochs + 1):
+            # train for one epoch
+            time1 = time.time()
+            self.retrain(self.parser.get_train_set(), self.model, epoch, self.logger)
+
+            time2 = time.time()
+            print('retrain epoch {}, total time {:.2f}'.format(epoch, time2 - time1))
+
+            # final validation
+            acc = self.validate(self.parser.get_valid_set(), self.model, self.evaluator)
+            print('Stream final acc: {}'.format(acc))
+
+    def train(self, train_loader, model, logger):  # task_list
+        """Training on single-pass of data"""
+        # Set validation frequency
+        batchs_per_class = np.floor(len(train_loader) / self.num_classes).astype('int')
+        if self.gpu:
+            torch.cuda.empty_cache()
+        with torch.no_grad():
+            # for idx, (images, labels) in enumerate(train_loader):
+            idx = 0  # batch index
+            cur_class = -1
+            self.mask = None
+            for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(train_loader, desc="Training")):
+            # for images, labels in tqdm(train_loader, desc="Training"):
+                # print(labels.detach().cpu().tolist())
+                # print(images.shape, labels.shape)
+                # if i > 10: # for debug
+                #     break
+                # proj_range = proj_range[0, :npoints]
+                # unproj_range = unproj_range[0, :npoints]
+                path_seq = path_seq[0]
+                path_name = path_name[0]
+
+                if self.gpu:
+                    proj_in = proj_in.cuda()
+                    proj_mask = proj_mask.cuda()
+                    # if self.post:
+                    #     proj_range = proj_range.cuda()
+                    #     unproj_range = unproj_range.cuda()
+
+                # samples_hv = self.model.encode(proj_in, self.mask) # (bsz*size, hd_dim)
+                samples_hv = self.model.encode(proj_in, self.mask)
+                samples_hv = samples_hv.to(model.classify_weights.dtype)
+
+                # samples_hv = samples_hv.float()
+                #proj_labels shape: torch.Size([1, 64, 512])
+                proj_labels = proj_labels.view(-1)  # shape: (btsz*64*512, 1)
+                proj_labels = proj_labels.to(self.device)
+                
+                # Debug - manually update the labels to the corresponding class
+                # for i in range(samples_hv.shape[0]):
+                #     model.classify_weights[proj_labels[i]] += samples_hv[i]
+                #     model.classify_sample_cnt[proj_labels[i]] += 1
+                
+                # Quick version - not sure if this is correct yet
+                model.classify_weights.index_add_(0, proj_labels, samples_hv)
+
+            model.classify.weight[:] = F.normalize(model.classify_weights)
+                # print("Finish one batch, update classify weights")
+    def retrain(self, train_loader, model, epoch, logger):  # task_list
+        """Training of one epoch on single-pass of data"""
+        # Set validation frequency
+        batchs_per_class = np.floor(len(train_loader) / self.num_classes).astype('int')
+        if self.gpu:
+            torch.cuda.empty_cache()
+        with torch.no_grad():
+            # for idx, (images, labels) in enumerate(train_loader):
+            idx = 0  # batch index
+            cur_class = -1
+            self.mask = None
+            total_miss = 0
+            for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(train_loader, desc="Retraining")):
+            # for images, labels in tqdm(train_loader, desc="Training"):
+                # print(labels.detach().cpu().tolist())
+                # print(images.shape, labels.shape)
+                # if i > 10: # for debug
+                #     break
+                # proj_range = proj_range[0, :npoints]
+                # unproj_range = unproj_range[0, :npoints]
+                path_seq = path_seq[0]
+                path_name = path_name[0]
+
+                if self.gpu:
+                    proj_in = proj_in.cuda()
+                    proj_mask = proj_mask.cuda()
+                    # if self.post:
+                    #     proj_range = proj_range.cuda()
+                    #     unproj_range = unproj_range.cuda()
+                model.classify.weight[:] = F.normalize(model.classify_weights)
+                predictions, samples_hv = model(proj_in, True)
+                argmax = predictions.argmax(dim=1) # (bsz*size, 1)
+                # #proj_labels shape: torch.Size([1, 64, 512])
+                proj_labels = proj_labels.view(-1)  # shape: (btsz*64*512, 1) 
+                proj_labels = proj_labels.to(self.device)
+
+                is_wrong = proj_labels != argmax
+                if is_wrong.sum().item() == 0:
+                    continue
+
+                # Check wrong classification number here and update the classify weights
+                total_miss += is_wrong.sum().item()
+                proj_labels = proj_labels[is_wrong]
+                argmax = argmax[is_wrong]
+                samples_hv = samples_hv[is_wrong]
+                samples_hv = samples_hv.to(model.classify_weights.dtype)
+
+                model.classify_weights.index_add_(0, proj_labels, samples_hv)
+                model.classify_weights.index_add_(0, argmax, -samples_hv)
+                # model.classify.weight[:] = F.normalize(model.classify_weights)
+
+                # print("Finish one batch, update classify weights")
+            print("total_miss: ", total_miss)
+
+    def validate(self, val_loader, model, evaluator):  # task_list
+        """Validation, evaluate linear classification accuracy and kNN accuracy"""
+        losses = AverageMeter()
+        jaccs = AverageMeter()
+        wces = AverageMeter()
+        acc = AverageMeter()
+        iou = AverageMeter()
+        rand_imgs = []
+        evaluator.reset()
+        with torch.no_grad():
+            for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(val_loader, desc="Validation")):
+                # p_x = p_x[0, :npoints]
+                # p_y = p_y[0, :npoints]
+                # proj_range = proj_range[0, :npoints]
+                # unproj_range = unproj_range[0, :npoints]
+                path_seq = path_seq[0]
+                path_name = path_name[0]
+
+                if self.gpu:
+                    proj_in = proj_in.cuda()
+                    # p_x = p_x.cuda()
+                    # p_y = p_y.cuda()
+                    # if self.post:
+                    #     proj_range = proj_range.cuda()
+                    #     unproj_range = unproj_range.cuda()
+                # print("proj_in shape: ", proj_in.shape) #torch.Size([1, 5, 64, 512])
+                predictions, _ = model(proj_in, True)
+                # print("predictions shape: ", predictions.shape) #torch.Size([32768, 20])
+                #print('outputs', outputs)
+                predictions = predictions.view(6, 64, 512, self.num_classes)  # (1, H, W, C)
+                predictions = predictions.permute(0, 3, 1, 2)        # → (1, C, H, W)
+                # print("predictions shape: ", predictions.shape) #torch.Size([1, 20, 64, 512])
+                argmax = predictions.argmax(dim=1)
+                argmax = argmax.squeeze(0) 
+                # print("argmax shape: ", argmax.shape) #torch.Size([1, 64, 512])
+                proj_labels = proj_labels.to(self.device)
+                
+                evaluator.addBatch(argmax, proj_labels)
+
+                # if torch.cuda.is_available():
+                #     torch.cuda.synchronize()
+                # if self.post:
+                #     # knn postproc
+                #     unproj_argmax = self.post(proj_range,
+                #                             unproj_range,
+                #                             argmax,
+                #                             p_x,
+                #                             p_y)
+                # else:
+                #     # put in original pointcloud using indexes
+                #     unproj_argmax = argmax[p_y, p_x]
+
+                # # measure elapsed time
+                # if torch.cuda.is_available():
+                #     torch.cuda.synchronize()
+                # # save scan
+                # # get the first scan in batch and project scan
+                # pred_np = unproj_argmax.cpu().numpy()
+                # pred_np = pred_np.reshape((-1)).astype(np.int32)
+
+                # # map to original label
+                # pred_np = to_orig_fn(pred_np)
+                # # save scan
+                # path = os.path.join(self.logdir, "sequences",
+                #                     path_seq, "predictions", path_name)
+                # pred_np.tofile(path)
+
+        accuracy = evaluator.getacc()
+        jaccard, class_jaccard = evaluator.getIoU()
+        acc.update(accuracy.item(), proj_in.size(0))
+        iou.update(jaccard.item(), proj_in.size(0))
+
+        print('Validation set:\n'
+                'Time avg per batch xxx\n'
+                'Loss avg {loss.avg:.4f}\n'
+                'Jaccard avg {jac.avg:.4f}\n'
+                'WCE avg {wces.avg:.4f}\n'
+                'Acc avg {acc.avg:.3f}\n'
+                'IoU avg {iou.avg:.3f}'.format(
+                                                loss=losses,
+                                                jac=jaccs,
+                                                wces=wces,
+                                                acc=acc, iou=iou))
+
+        return iou.avg

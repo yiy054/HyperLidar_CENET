@@ -151,7 +151,7 @@ class ResNet_34(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, HDC = False):
 
         x = self.conv1(x)
         x = self.conv2(x)
@@ -170,6 +170,8 @@ class ResNet_34(nn.Module):
         out = torch.cat(res, dim=1)
         out = self.conv_1(out)
         out = self.conv_2(out)
+        if HDC:
+            return out
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
 

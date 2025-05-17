@@ -9,6 +9,7 @@ from shutil import copyfile
 import os
 import shutil
 from modules.user import User
+from modules.Basic_HD import BasicHD
 
 if __name__ == '__main__':
     splits = ["train", "valid", "test"]
@@ -56,7 +57,8 @@ if __name__ == '__main__':
     # open arch config file
     try:
         print("Opening arch config file from %s" % FLAGS.model)
-        ARCH = yaml.safe_load(open(FLAGS.model + "/arch_cfg.yaml", 'r'))
+        # ARCH = yaml.safe_load(open(FLAGS.model + "/arch_cfg.yaml", 'r'))
+        ARCH = yaml.safe_load(open("config/arch/senet-512.yml", 'r'))
     except Exception as e:
         print(e)
         print("Error opening arch yaml file.")
@@ -65,7 +67,8 @@ if __name__ == '__main__':
     # open data config file
     try:
         print("Opening data config file from %s" % FLAGS.model)
-        DATA = yaml.safe_load(open(FLAGS.model + "/data_cfg.yaml", 'r'))
+        # DATA = yaml.safe_load(open(FLAGS.model + "/data_cfg.yaml", 'r'))
+        DATA = yaml.safe_load(open("config/labels/semantic-kitti.yaml", 'r'))
     except Exception as e:
         print(e)
         print("Error opening data yaml file.")
@@ -110,5 +113,10 @@ if __name__ == '__main__':
         quit()
 
     # create user and infer dataset
-    user = User(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model,FLAGS.split)
-    user.infer()
+    # user = User(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model,FLAGS.split)
+    # user.infer()
+
+    BasicHD = BasicHD(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model,FLAGS.split, None)
+    BasicHD.start()
+
+

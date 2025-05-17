@@ -192,7 +192,7 @@ class Trainer():
 
         if self.path is not None:
             torch.nn.Module.dump_patches = True
-            w_dict = torch.load(path + "/SENet_valid_best",
+            w_dict = torch.load(path + "/SENet",
                                 map_location=lambda storage, loc: storage)
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
 #             self.optimizer.load_state_dict(w_dict['optimizer'])

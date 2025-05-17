@@ -44,6 +44,13 @@ Download SemanticKITTI from [official web](http://www.semantic-kitti.org/dataset
     `python3 train.py -d /root/CENet/dense_dataset_semantic/ -ac config/arch/senet-512.yml -n senet-512`
     `python3 train.py -d /root/CENet/nuscenes_kitti/ -ac config/arch/senet-512.yml -n nuscenes`
 
+    '''
+    python train.py -d /mnt/data/dataset/semantickitti -ac config/arch/senet-512.yml -n senet-512
+    python train.py -d /mnt/data/dataset/semantickitti -ac config/arch/senet-512.yml -n senet-512 -p pretrain0_4/senet-512
+    python train.py -d /mnt/data -ac config/arch/senet-1024p.yml -n senet-1024 -p logs/senet-512
+    python train.py -d /mnt/data -ac config/arch/senet-2048p.yml -n senet-2048 -p logs/senet-1024
+    '''
+
     Note that the following training strategy is used due to GPU and time constraints, see [kitti.sh](https://github.com/huixiancheng/SENet/blob/main/kitti.sh) for details.
 
     First train the model with 64x512 inputs. Then load the pre-trained model to train the model with 64x1024 inputs, and finally load the pre-trained model to train the model with 64x2048 inputs.
@@ -58,6 +65,10 @@ Download SemanticKITTI from [official web](http://www.semantic-kitti.org/dataset
 - SemanticKITTI:
 
     `python infer.py -d /your_dataset -l /your_predictions_path -m trained_model -s valid/test`
+    '''
+    python infer.py -d /mnt/data/dataset/semantickitti -l HDC_result -m /mnt/data/dataset/'Final result'/512-594 -s valid
+    python infer.py -d /mnt/data/dataset/semantickitti -l HDC_result -m pretrain0_4/senet-512 -s valid
+    '''
     
     Eval for valid sequences:
 
