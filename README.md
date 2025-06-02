@@ -1,4 +1,4 @@
-# CENet: Toward Concise and Efficient LiDAR Semantic Segmentation for Autonomous Driving [![arXiv](https://img.shields.io/badge/arXiv-2207.12691-b31b1b?logo=arXiv&logoColor=green)](https://arxiv.org/abs/2207.12691)
+# HyperLidar: Toward Concise and Efficient LiDAR Semantic Segmentation for Autonomous Driving [![arXiv](https://img.shields.io/badge/arXiv-2207.12691-b31b1b?logo=arXiv&logoColor=green)](https://arxiv.org/abs/2207.12691)
 
 Code for our paper:
 > **CENet: Toward Concise and Efficient LiDAR Semantic Segmentation for Autonomous Driving**
@@ -6,50 +6,92 @@ Code for our paper:
 > Accepted by ICME2022
 
 ## Abstract：
-Accurate and fast scene understanding is one of the challenging task for autonomous driving, which requires to take full advantage of LiDAR point clouds for semantic segmentation. 
-In this paper, we present a concise and efficient image-based semantic segmentation network, named CENet. 
-In order to improve the descriptive power of learned features and reduce the computational as well as time complexity, 
-our CENet integrates the convolution with larger kernel size instead of MLP, carefully-selected activation functions, 
-and multiple auxiliary segmentation heads with corresponding loss functions into architecture. 
-Quantitative and qualitative experiments conducted on publicly available benchmarks, SemanticKITTI and SemanticPOSS, 
-demonstrate that our pipeline achieves much better mIoU and inference performance compared with state-of-the-art models.
-
 
 ## Updates:
-**2023-03-28[NEW:sparkles:]** CENet achieves competitive performance in robustness evaluation at SemanticKITTI. See Repo of [Robo3D](https://github.com/ldkong1205/Robo3D) for more details.
+<!-- **2023-03-28[NEW:sparkles:]** CENet achieves competitive performance in robustness evaluation at SemanticKITTI. See Repo of [Robo3D](https://github.com/ldkong1205/Robo3D) for more details.
 <div align="center">
   <img src="assert/robustness.png"/>
 </div><br/>
 
-**2022-07-06[:open_mouth::scream::thumbsup:]** [Ph.D. Hou](https://github.com/cardwing) reported an astounding 67.6% mIoU test performance of CENet, see [this issue](https://github.com/huixiancheng/CENet/issues/7) and [PVD Repo](https://github.com/cardwing/Codes-for-PVKD) for details.
-
-**2022-03-28[:sunglasses:]** Suggested by reviewer, renamed to CENet.
-
-**2022-03-07[:yum:]** SENet was very lucky to be ~~provisionally~~ accepted by ICME 2022.
-
-**2021-12-29 [:sunglasses:]** Release models and training logs, which also contains ablation studies. (Please note that due to multiple updates of the code, some models and configs have inconsistencies that lead to errors, please make corresponding changes according to the specific situation.)
+**2022-07-06[:open_mouth::scream::thumbsup:]** [Ph.D. Hou](https://github.com/cardwing) reported an astounding 67.6% mIoU test performance of CENet, see [this issue](https://github.com/huixiancheng/CENet/issues/7) and [PVD Repo](https://github.com/cardwing/Codes-for-PVKD) for details. -->
 
 ## Prepare:
 Download SemanticKITTI from [official web](http://www.semantic-kitti.org/dataset.html). Download SemanticPOSS from [official web](http://www.poss.pku.edu.cn./download.html).
 
+You can use the provided [Nautilus deployment YAML](./nautilus/hyperlidar.yaml) to launch the container environment.
+
+- The base image used is:  
+  ```
+  ghcr.io/darthiv02/cenet_image:1.1
+  ```
+  > ⚠️ This image includes only the original **CENet** backbone and does **not** include HyperLiDAR support.
+
+- To enable **TorchHD** functionality (for HyperLiDAR), you’ll need to manually install the `torch-hd` package [torch-hd](https://github.com/hyperdimensional-computing/torchhd?tab=readme-ov-file) :
+  ```bash
+  pip install torch-hd
+  ```
+
+### 🔄 Switching to HyperLiDAR
+
+To work with **HyperLiDAR**, clone the specialized repository instead:
+```bash
+git clone https://github.com/yiy054/HyperLidar_CENET.git
+```
+
+### 📁 Dataset Setup (on Nautilus)
+
+If you're using the Nautilus environment and YAML deployment:
+
+1. Download and extract the SemanticKITTI dataset:
+   ```bash
+   cd /mnt/data
+   cp /root/main/dataset/semantickitti_fast.tar.gz .
+   tar -xvzf semantickitti_fast.tar.gz
+   cd /home
+   ```
+
+2. After extraction, the dataset will be available at:
+   ```
+   /mnt/data/semantickitti
+   ```
+
+
+## File Structure:
+Used the 
+```
+.
+├── LICENSE
+├── README.md           // this file
+├── main.py             // main file (different method...)
+├── methods             // implementation of HyperLidar
+├── requirements_cenet.txt
+├── dataset             // dataset loader
+└── config              // dataset and model config
+```
+
 ## Usage：
 ### Train：
-- SemanticKITTI:
-    ` sudo docker run -it --rm \              
-  --runtime nvidia --gpus all \
-  -v "$(pwd)/CENet:/root/CENet" \
-  --name test_container \
-  dustynv/l4t-pytorch:r36.2.0 \
-  bash`
-    `python3 train.py -d /root/CENet/dense_dataset_semantic/ -ac config/arch/senet-512.yml -n senet-512`
-    `python3 train.py -d /root/CENet/nuscenes_kitti/ -ac config/arch/senet-512.yml -n nuscenes`
+- Pretrain:
+    <!-- ```
+    sudo docker run -it --rm \              
+      --runtime nvidia --gpus all \
+      -v "$(pwd)/CENet:/root/CENet" \
+      --name test_container \
+      dustynv/l4t-pytorch:r36.2.0 \
+      bash
+    ``` -->
+    `python train.py -d /mnt/data/semantickitti -ac config/arch/senet-512.yml -n senet-512 -l pretrain0_4 -t 0,1,2,3,4`
 
-    '''
-    python train.py -d /mnt/data/dataset/semantickitti -ac config/arch/senet-512.yml -n senet-512
-    python train.py -d /mnt/data/dataset/semantickitti -ac config/arch/senet-512.yml -n senet-512 -p pretrain0_4/senet-512
-    python train.py -d /mnt/data -ac config/arch/senet-1024p.yml -n senet-1024 -p logs/senet-512
-    python train.py -d /mnt/data -ac config/arch/senet-2048p.yml -n senet-2048 -p logs/senet-1024
-    '''
+    `python train.py -d /mnt/data/semantickitti -ac config/arch/senet-512.yml -n senet-512 -l retrain5_10 -p pretrain0_4/senet-512 -t 5,6,7,9,10`
+    ```
+    python train.py 
+      -d <dataset_path> 
+      -ac config/arch/senet-512.yml 
+      -l <save_dic> 
+      -n senet-512 
+      -p <pretrain_model_path> 
+      -t <train_seqs>
+    ```
 
     Note that the following training strategy is used due to GPU and time constraints, see [kitti.sh](https://github.com/huixiancheng/SENet/blob/main/kitti.sh) for details.
 
@@ -57,18 +99,26 @@ Download SemanticKITTI from [official web](http://www.semantic-kitti.org/dataset
     
     Also, for this reason, if you want to resume training from a breakpoint, uncomment [this section](https://github.com/huixiancheng/SENet/blob/c5827853ee32660ad9487a679890822ac9bf8bf8/modules/trainer.py#L193-L203) and change "/SENet_valid_best" to "/SENet".
 
-- SemanticPOSS:
+    Currently, HyperLidar only focuse on senet-512 size and used the retrain as the online learning process. Therefore, the train sequence will be change when the pretrain model exist and need to used the dataset sequence that never seem before. 
+- Online learning:
 
-    `python train_poss.py -d /your_dataset -ac config/arch/poss.yml -n res`
+  `python main.py -d /mnt/data/semantickitti -l your_predictions_path -m pretrain0_4/senet-512 -t 5,6,7,9,10`
 
-### Infer and Eval：
+  ```
+  python main.py 
+    -d <dataset_path> 
+    -l <save_pred_dic> 
+    -m <pretrain_model_path>
+    -t <train_seqs>
+  ```
+<!-- ### Infer and Eval：
 - SemanticKITTI:
 
     `python infer.py -d /your_dataset -l /your_predictions_path -m trained_model -s valid/test`
-    '''
+    ```
     python infer.py -d /mnt/data/dataset/semantickitti -l HDC_result -m /mnt/data/dataset/'Final result'/512-594 -s valid
     python infer.py -d /mnt/data/dataset/semantickitti -l HDC_result -m pretrain0_4/senet-512 -s valid
-    '''
+    ```
     
     Eval for valid sequences:
 
@@ -80,9 +130,9 @@ Download SemanticKITTI from [official web](http://www.semantic-kitti.org/dataset
 
     `python infer_poss.py -d /your_dataset -l /your_predictions_path -m trained_model`
 
-    This will generate both predictions and mIoU results.
+    This will generate both predictions and mIoU results. -->
 
-### Visualize Example:
+<!-- ### Visualize Example:
 
 
 - Visualize GT:
@@ -91,7 +141,7 @@ Download SemanticKITTI from [official web](http://www.semantic-kitti.org/dataset
 
 - Visualize Predictions:
 
-  `python visualize.py -w kitti/poss -d /your_dataset -p /your_predictions -s what_sequences`
+  `python visualize.py -w kitti/poss -d /your_dataset -p /your_predictions -s what_sequences` -->
 
 
 ## Pretrained Models and Logs:

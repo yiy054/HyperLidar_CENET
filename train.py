@@ -69,6 +69,13 @@ if __name__ == '__main__':
         default=None,
         help='Directory to get the pretrained model. If not passed, do from scratch!'
     )
+    parser.add_argument(
+        '--train_seq', '-t', 
+        type=str, 
+        required=False,
+        default=None,
+        help='Comma-separated list of training sequences (e.g., "0,1,2")'
+    )
 
     FLAGS, unparsed = parser.parse_known_args()
     FLAGS.log = FLAGS.log + '/' + FLAGS.name
@@ -129,6 +136,16 @@ if __name__ == '__main__':
         print(e)
         print("Error copying files, check permissions. Exiting...")
         quit()
+    
+    if FLAGS.train_seq is not None:
+        try:
+            DATA["split"]["train"] = [int(s.strip()) for s in FLAGS.train_seq.split(",")]
+            print(f"[INFO] Overriding training sequences: {DATA['split']['train']}")
+        except ValueError as e:
+            print(f"[ERROR] Failed to parse --train_seq: {e}")
+            exit(1)
+    else:
+        print("[INFO] Using default training sequences from data config.")
 
     # create trainer and start the training
     trainer = Trainer(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.pretrained)

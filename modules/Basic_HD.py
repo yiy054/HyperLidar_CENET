@@ -7,6 +7,7 @@ import sys
 import argparse
 import time
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 from modules.HDC_utils import set_model
@@ -19,13 +20,11 @@ from common.avgmeter import *
 from torchhd import functional
 from torchhd import embeddings
 
-import torch.nn as nn
-
 
 VAL_CNT = 10
 
 class BasicHD():
-    def __init__(self, ARCH, DATA, datadir, logdir, modeldir, split,
+    def __init__(self, ARCH, DATA, datadir, logdir, modeldir,
                 logger):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -37,7 +36,6 @@ class BasicHD():
         self.datadir = datadir
         self.logdir = logdir
         self.modeldir = modeldir
-        self.split = split
         self.epochs = 10
 
         from dataset.kitti.parser import Parser
@@ -90,6 +88,7 @@ class BasicHD():
             self.model.cuda()
 
     def start(self):
+        print("Starting training with the HDC online learning:")
         self.model.eval()
         self.ignore_class = []
         for i, w in enumerate(self.loss_w):
