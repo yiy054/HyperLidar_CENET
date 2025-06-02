@@ -111,13 +111,13 @@ Used the
     -m <pretrain_model_path>
     -t <train_seqs>
   ```
-<!-- ### Infer and Eval：
+### CENET Infer and Eval：
 - SemanticKITTI:
 
     `python infer.py -d /your_dataset -l /your_predictions_path -m trained_model -s valid/test`
     ```
-    python infer.py -d /mnt/data/dataset/semantickitti -l HDC_result -m /mnt/data/dataset/'Final result'/512-594 -s valid
-    python infer.py -d /mnt/data/dataset/semantickitti -l HDC_result -m pretrain0_4/senet-512 -s valid
+    python infer.py -d /mnt/data/semantickitti -l HDC_result -m /mnt/data/dataset/'Final result'/512-594 -s valid
+    python infer.py -d /mnt/data/semantickitti -l HDC_result -m pretrain0_4/senet-512 -s valid
     ```
     
     Eval for valid sequences:
@@ -130,7 +130,7 @@ Used the
 
     `python infer_poss.py -d /your_dataset -l /your_predictions_path -m trained_model`
 
-    This will generate both predictions and mIoU results. -->
+    This will generate both predictions and mIoU results.
 
 <!-- ### Visualize Example:
 

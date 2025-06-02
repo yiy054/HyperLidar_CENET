@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -79,7 +80,7 @@ class BasicConv():
             learning_map_inv=self.DATA["learning_map_inv"],
             sensor=self.ARCH["dataset"]["sensor"],
             max_points=self.ARCH["dataset"]["max_points"],
-            batch_size=6,
+            batch_size=self.ARCH["train"]["batch_size"],
             workers=self.ARCH["train"]["workers"],
             gt=True,
             shuffle_train=False
@@ -155,14 +156,14 @@ class BasicConv():
         encoder.eval()
         semantic_output.train()
         scaler = torch.cuda.amp.GradScaler()
-
+        train_time = []
         for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(train_loader, desc="Training")):
             proj_in = proj_in.to(self.device)
             proj_mask = proj_mask.to(self.device)
 
             if self.gpu:
                 proj_labels = proj_labels.cuda().long()
-
+            start = time.time()
             with torch.cuda.amp.autocast():
                 features = self.encoder(proj_in, only_feat=True)
                 logits = self.semantic_output(features)
@@ -172,6 +173,11 @@ class BasicConv():
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
+            if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+            res = time.time() - start
+            train_time.append(res)
+            start = time.time()
             with torch.no_grad():
                 evaluator.reset()
                 argmax = logits.argmax(dim=1)
@@ -182,6 +188,7 @@ class BasicConv():
             acc.update(accuracy.item(), proj_in.size(0))
             iou.update(jaccard.item(), proj_in.size(0))
             scheduler.step()
+        print("Mean Conv training time:{}\t std:{}".format(np.mean(train_time), np.std(train_time)))
         return iou.avg
 
     def validate(self, val_loader, encoder, semantic_output, criterion, evaluator):
@@ -190,6 +197,7 @@ class BasicConv():
         wces = AverageMeter()
         acc = AverageMeter()
         iou = AverageMeter()
+        validation_time = []
         
         encoder.eval()
         semantic_output.eval()
@@ -203,17 +211,23 @@ class BasicConv():
                 proj_mask = proj_mask.cuda()
             if self.gpu:
                 proj_labels = proj_labels.cuda(non_blocking=True).long()
-            
+            start = time.time()
             with torch.no_grad():
                 features = self.encoder(proj_in, only_feat=True)
                 logits = self.semantic_output(features)
                 predictions = logits.argmax(dim=1)
+            if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+            res = time.time() - start
+            validation_time.append(res)
+            start = time.time()
 
             evaluator.addBatch(predictions, proj_labels)
         accuracy = evaluator.getacc()
         jaccard, class_jaccard = evaluator.getIoU()
         acc.update(accuracy.item(), proj_in.size(0))
         iou.update(jaccard.item(), proj_in.size(0))
+        print("Mean Conv validation time:{}\t std:{}".format(np.mean(validation_time), np.std(validation_time)))
         return iou.avg
 
     def start(self):

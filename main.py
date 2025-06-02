@@ -118,11 +118,11 @@ if __name__ == '__main__':
     else:
         print("[INFO] Using default training sequences from data config.")
 
-    # from modules.Basic_HD import BasicHD
-    # BasicHD = BasicHD(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model, None)
-    # BasicHD.start()
+    from modules.Basic_HD import BasicHD
+    BasicHD = BasicHD(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model, None)
+    BasicHD.start()
 
-    from modules.Basic_Conv import BasicConv
-    BasicConv = BasicConv(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model, None)
-    BasicConv.start()
+    # from modules.Basic_Conv import BasicConv
+    # BasicConv = BasicConv(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model, None)
+    # BasicConv.start()
 

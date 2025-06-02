@@ -113,10 +113,10 @@ if __name__ == '__main__':
         quit()
 
     # create user and infer dataset
-    # user = User(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model,FLAGS.split)
-    # user.infer()
+    user = User(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model,FLAGS.split)
+    user.infer()
 
-    BasicHD = BasicHD(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model,FLAGS.split, None)
-    BasicHD.start()
+    # BasicHD = BasicHD(ARCH, DATA, FLAGS.dataset, FLAGS.log, FLAGS.model,FLAGS.split, None)
+    # BasicHD.start()
 
 

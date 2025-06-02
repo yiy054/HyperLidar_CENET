@@ -49,7 +49,7 @@ class BasicHD():
                                         learning_map_inv=self.DATA["learning_map_inv"],
                                         sensor=self.ARCH["dataset"]["sensor"],
                                         max_points=self.ARCH["dataset"]["max_points"],
-                                        batch_size=6,
+                                        batch_size=self.ARCH["train"]["batch_size"],
                                         workers=self.ARCH["train"]["workers"],
                                         gt=True,
                                         shuffle_train=False)
@@ -127,8 +127,8 @@ class BasicHD():
             idx = 0  # batch index
             cur_class = -1
             self.mask = None
+            train_time = []
             for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(train_loader, desc="Training")):
-            # for images, labels in tqdm(train_loader, desc="Training"):
                 # print(labels.detach().cpu().tolist())
                 # print(images.shape, labels.shape)
                 # if i > 10: # for debug
@@ -146,6 +146,7 @@ class BasicHD():
                     #     unproj_range = unproj_range.cuda()
 
                 # samples_hv = self.model.encode(proj_in, self.mask) # (bsz*size, hd_dim)
+                start = time.time()
                 samples_hv = self.model.encode(proj_in, self.mask)
                 samples_hv = samples_hv.to(model.classify_weights.dtype)
 
@@ -161,9 +162,16 @@ class BasicHD():
                 
                 # Quick version - not sure if this is correct yet
                 model.classify_weights.index_add_(0, proj_labels, samples_hv)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                res = time.time() - start
+                train_time.append(res)
+                start = time.time()
 
             model.classify.weight[:] = F.normalize(model.classify_weights)
-                # print("Finish one batch, update classify weights")
+            print("Mean HDC training time:{}\t std:{}".format(np.mean(train_time), np.std(train_time)))
+            # print("Finish one batch, update classify weights")
+    
     def retrain(self, train_loader, model, epoch, logger):  # task_list
         """Training of one epoch on single-pass of data"""
         # Set validation frequency
@@ -176,8 +184,8 @@ class BasicHD():
             cur_class = -1
             self.mask = None
             total_miss = 0
+            retrain_time = []
             for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(train_loader, desc="Retraining")):
-            # for images, labels in tqdm(train_loader, desc="Training"):
                 # print(labels.detach().cpu().tolist())
                 # print(images.shape, labels.shape)
                 # if i > 10: # for debug
@@ -193,6 +201,7 @@ class BasicHD():
                     # if self.post:
                     #     proj_range = proj_range.cuda()
                     #     unproj_range = unproj_range.cuda()
+                start = time.time()
                 model.classify.weight[:] = F.normalize(model.classify_weights)
                 predictions, samples_hv = model(proj_in, True)
                 argmax = predictions.argmax(dim=1) # (bsz*size, 1)
@@ -214,9 +223,15 @@ class BasicHD():
                 model.classify_weights.index_add_(0, proj_labels, samples_hv)
                 model.classify_weights.index_add_(0, argmax, -samples_hv)
                 # model.classify.weight[:] = F.normalize(model.classify_weights)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                res = time.time() - start
+                retrain_time.append(res)
+                start = time.time()
 
                 # print("Finish one batch, update classify weights")
             print("total_miss: ", total_miss)
+            print("Mean HDC retraining time:{}\t std:{}".format(np.mean(retrain_time), np.std(retrain_time)))
 
     def validate(self, val_loader, model, evaluator):  # task_list
         """Validation, evaluate linear classification accuracy and kNN accuracy"""
@@ -227,6 +242,7 @@ class BasicHD():
         iou = AverageMeter()
         rand_imgs = []
         evaluator.reset()
+        validation_time = []
         with torch.no_grad():
             for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(val_loader, desc="Validation")):
                 # p_x = p_x[0, :npoints]
@@ -235,6 +251,7 @@ class BasicHD():
                 # unproj_range = unproj_range[0, :npoints]
                 path_seq = path_seq[0]
                 path_name = path_name[0]
+                B, C, H, W = proj_in.shape[0], proj_in.shape[1], proj_in.shape[2], proj_in.shape[3]
 
                 if self.gpu:
                     proj_in = proj_in.cuda()
@@ -243,11 +260,18 @@ class BasicHD():
                     # if self.post:
                     #     proj_range = proj_range.cuda()
                     #     unproj_range = unproj_range.cuda()
+                start = time.time()
                 # print("proj_in shape: ", proj_in.shape) #torch.Size([1, 5, 64, 512])
                 predictions, _ = model(proj_in, True)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                res = time.time() - start
+                validation_time.append(res)
+                start = time.time()
                 # print("predictions shape: ", predictions.shape) #torch.Size([32768, 20])
                 #print('outputs', outputs)
-                predictions = predictions.view(6, 64, 512, self.num_classes)  # (1, H, W, C)
+
+                predictions = predictions.view(B, H, W, self.num_classes)  # (1, H, W, C)
                 predictions = predictions.permute(0, 3, 1, 2)        # → (1, C, H, W)
                 # print("predictions shape: ", predictions.shape) #torch.Size([1, 20, 64, 512])
                 argmax = predictions.argmax(dim=1)
@@ -284,7 +308,7 @@ class BasicHD():
                 # path = os.path.join(self.logdir, "sequences",
                 #                     path_seq, "predictions", path_name)
                 # pred_np.tofile(path)
-
+            print("Mean HDC validation time:{}\t std:{}".format(np.mean(validation_time), np.std(validation_time)))
         accuracy = evaluator.getacc()
         jaccard, class_jaccard = evaluator.getIoU()
         acc.update(accuracy.item(), proj_in.size(0))

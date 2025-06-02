@@ -7,6 +7,8 @@ import torch.backends.cudnn as cudnn
 import time
 import os
 import numpy as np
+import time
+from tqdm import tqdm
 from postproc.KNN import KNN
 
 
@@ -69,7 +71,7 @@ class User():
             elif self.ARCH["train"]["act"] == "SiLU":
                 convert_relu_to_softplus(self.model, nn.SiLU())
 
-#     print(self.model)
+    # print(self.model)
     w_dict = torch.load(modeldir + "/SENet_valid_best",
                         map_location=lambda storage, loc: storage)
     self.model.load_state_dict(w_dict['state_dict'], strict=True)
@@ -134,7 +136,7 @@ class User():
       torch.cuda.empty_cache()
 
     with torch.no_grad():
-      for i, (proj_in, proj_mask, _, _, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(loader):
+      for i, (proj_in, proj_mask, _, _, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(loader, desc="Validating")):
         # first cut to rela size (batch size one allows it)
         p_x = p_x[0, :npoints]
         p_y = p_y[0, :npoints]
@@ -150,6 +152,7 @@ class User():
           if self.post:
             proj_range = proj_range.cuda()
             unproj_range = unproj_range.cuda()
+        # Count the real time for the inference
         end = time.time()
 
         if self.ARCH["train"]["aux_loss"]:
@@ -160,11 +163,12 @@ class User():
                 proj_output = self.model(proj_in)
 
         proj_argmax = proj_output[0].argmax(dim=0)
+        # measure elapsed time
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         res = time.time() - end
-        print("Network seq", path_seq, "scan", path_name,
-              "in", res, "sec")
+        # print("Network seq", path_seq, "scan", path_name,
+        #       "in", res, "sec")
         end = time.time()
         cnn.append(res)
 
@@ -175,23 +179,23 @@ class User():
                                       proj_argmax,
                                       p_x,
                                       p_y)
-#             # nla postproc
-#             proj_unfold_range, proj_unfold_pre = NN_filter(proj_range, proj_argmax)
-#             proj_unfold_range=proj_unfold_range.cpu().numpy()
-#             proj_unfold_pre=proj_unfold_pre.cpu().numpy()
-#             unproj_range = unproj_range.cpu().numpy()
-#             #  Check this part. Maybe not correct (Low speed caused by for loop)
-#             #  Just simply change from
-#             #  https://github.com/placeforyiming/IROS21-FIDNet-SemanticKITTI/blob/7f90b45a765b8bba042b25f642cf12d8fccb5bc2/semantic_inference.py#L177-L202
-#             for jj in range(len(p_x)):
-#                 py, px = p_y[jj].cpu().numpy(), p_x[jj].cpu().numpy()
-#                 if unproj_range[jj] == proj_range[py, px]:
-#                     unproj_argmax = proj_argmax[py, px]
-#                 else:
-#                     potential_label = proj_unfold_pre[0, :, py, px]
-#                     potential_range = proj_unfold_range[0, :, py, px]
-#                     min_arg = np.argmin(abs(potential_range - unproj_range[jj]))
-#                     unproj_argmax = potential_label[min_arg]
+            # # nla postproc
+            # proj_unfold_range, proj_unfold_pre = NN_filter(proj_range, proj_argmax)
+            # proj_unfold_range=proj_unfold_range.cpu().numpy()
+            # proj_unfold_pre=proj_unfold_pre.cpu().numpy()
+            # unproj_range = unproj_range.cpu().numpy()
+            # #  Check this part. Maybe not correct (Low speed caused by for loop)
+            # #  Just simply change from
+            # #  https://github.com/placeforyiming/IROS21-FIDNet-SemanticKITTI/blob/7f90b45a765b8bba042b25f642cf12d8fccb5bc2/semantic_inference.py#L177-L202
+            # for jj in range(len(p_x)):
+            #     py, px = p_y[jj].cpu().numpy(), p_x[jj].cpu().numpy()
+            #     if unproj_range[jj] == proj_range[py, px]:
+            #         unproj_argmax = proj_argmax[py, px]
+            #     else:
+            #         potential_label = proj_unfold_pre[0, :, py, px]
+            #         potential_range = proj_unfold_range[0, :, py, px]
+            #         min_arg = np.argmin(abs(potential_range - unproj_range[jj]))
+            #         unproj_argmax = potential_label[min_arg]
 
         else:
             # put in original pointcloud using indexes
@@ -201,8 +205,8 @@ class User():
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         res = time.time() - end
-        print("KNN Infered seq", path_seq, "scan", path_name,
-              "in", res, "sec")
+        # print("KNN Infered seq", path_seq, "scan", path_name,
+        #       "in", res, "sec")
         knn.append(res)
         end = time.time()
 

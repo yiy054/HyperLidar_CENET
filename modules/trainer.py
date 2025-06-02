@@ -84,8 +84,8 @@ class Trainer():
             content[x_cl] += freq
         self.loss_w = 1 / (content + epsilon_w)  # get weights
 
-#         power_value = 0.25
-#         self.loss_w = np.power(self.loss_w, power_value) * np.power(10, 1 - power_value)
+        # power_value = 0.25
+        # self.loss_w = np.power(self.loss_w, power_value) * np.power(10, 1 - power_value)
 
         for x_cl, w in enumerate(self.loss_w):  # ignore the ones necessary to ignore
             if DATA["learning_ignore"][x_cl]:
@@ -159,10 +159,10 @@ class Trainer():
             self.criterion = nn.DataParallel(self.criterion).cuda()  # spread in gpus
             self.ls = nn.DataParallel(self.ls).cuda()
 
-#         self.optimizer = optim.AdamW(self.model.parameters(), lr=0.0001, weight_decay=0.0005)
-#         from modules.adam_policy import MyLR
-#         self.scheduler = MyLR(optimizer=self.optimizer, cycle=30)
-#         print(self.optimizer)
+        # self.optimizer = optim.AdamW(self.model.parameters(), lr=0.0001, weight_decay=0.0005)
+        # from modules.adam_policy import MyLR
+        # self.scheduler = MyLR(optimizer=self.optimizer, cycle=30)
+        # print(self.optimizer)
 
         if self.ARCH["train"]["scheduler"] == "consine":
             length = self.parser.get_train_size()
@@ -195,11 +195,11 @@ class Trainer():
             w_dict = torch.load(path + "/SENet",
                                 map_location=lambda storage, loc: storage)
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
-#             self.optimizer.load_state_dict(w_dict['optimizer'])
-#             self.epoch = w_dict['epoch'] + 1
-#             self.scheduler.load_state_dict(w_dict['scheduler'])
+            # self.optimizer.load_state_dict(w_dict['optimizer'])
+            # self.epoch = w_dict['epoch'] + 1
+            # self.scheduler.load_state_dict(w_dict['scheduler'])
             print("dict epoch:", w_dict['epoch'])
-#             self.info = w_dict['info']
+            # self.info = w_dict['info']
             print("info", w_dict['info'])
 
 
@@ -374,6 +374,7 @@ class Trainer():
         iou = AverageMeter()
         update_ratio_meter = AverageMeter()
         bd = AverageMeter()
+        train_time = []
 
         # empty the cache to train now
         if self.gpu:
@@ -393,27 +394,27 @@ class Trainer():
             if self.gpu:
                 proj_labels = proj_labels.cuda().long()
 
-#                 proj_labels = proj_labels.unsqueeze(1).type(torch.FloatTensor)
-#                 from torch.nn import functional as F
-#                 [n, c, h, w] = proj_labels.size()
-#                 proj_labels_8 = F.interpolate(proj_labels, size=(h//8, w//8), mode='nearest').squeeze(1).cuda().long()
-#                 proj_labels_4 = F.interpolate(proj_labels, size=(h//4, w//4), mode='nearest').squeeze(1).cuda().long()
-#                 proj_labels_2 = F.interpolate(proj_labels, size=(h//2, w//2), mode='nearest').squeeze(1).cuda().long()
-#                 proj_labels = proj_labels.squeeze(1).cuda().long()
+                # proj_labels = proj_labels.unsqueeze(1).type(torch.FloatTensor)
+                # from torch.nn import functional as F
+                # [n, c, h, w] = proj_labels.size()
+                # proj_labels_8 = F.interpolate(proj_labels, size=(h//8, w//8), mode='nearest').squeeze(1).cuda().long()
+                # proj_labels_4 = F.interpolate(proj_labels, size=(h//4, w//4), mode='nearest').squeeze(1).cuda().long()
+                # proj_labels_2 = F.interpolate(proj_labels, size=(h//2, w//2), mode='nearest').squeeze(1).cuda().long()
+                # proj_labels = proj_labels.squeeze(1).cuda().long()
 
-
+            start = time.time()
             # compute output
             with torch.cuda.amp.autocast():
 
-#                 if self.ARCH["train"]["aux_loss"]:
-#                     [output, z2, z4, z8] = model(in_vol)
-#                     lamda = self.ARCH["train"]["lamda"]
-#                     bdlosss = self.bd(output, proj_labels.long()) + lamda*self.bd(z2, proj_labels_2.long()) + lamda*self.bd(z4, proj_labels_4.long()) + lamda*self.bd(z8, proj_labels_8.long())
-#                     loss_m0 = criterion(torch.log(output.clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(output, proj_labels.long())
-#                     loss_m2 = criterion(torch.log(z2.clamp(min=1e-8)), proj_labels_2) + 1.5 * self.ls(z2, proj_labels_2.long())
-#                     loss_m4 = criterion(torch.log(z4.clamp(min=1e-8)), proj_labels_4) + 1.5 * self.ls(z4, proj_labels_4.long())
-#                     loss_m8 = criterion(torch.log(z8.clamp(min=1e-8)), proj_labels_8) + 1.5 * self.ls(z8, proj_labels_8.long())
-#                     loss_m = loss_m0 + lamda*loss_m2 + lamda*loss_m4 + lamda*loss_m8 + bdlosss
+                # if self.ARCH["train"]["aux_loss"]:
+                #     [output, z2, z4, z8] = model(in_vol)
+                #     lamda = self.ARCH["train"]["lamda"]
+                #     bdlosss = self.bd(output, proj_labels.long()) + lamda*self.bd(z2, proj_labels_2.long()) + lamda*self.bd(z4, proj_labels_4.long()) + lamda*self.bd(z8, proj_labels_8.long())
+                #     loss_m0 = criterion(torch.log(output.clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(output, proj_labels.long())
+                #     loss_m2 = criterion(torch.log(z2.clamp(min=1e-8)), proj_labels_2) + 1.5 * self.ls(z2, proj_labels_2.long())
+                #     loss_m4 = criterion(torch.log(z4.clamp(min=1e-8)), proj_labels_4) + 1.5 * self.ls(z4, proj_labels_4.long())
+                #     loss_m8 = criterion(torch.log(z8.clamp(min=1e-8)), proj_labels_8) + 1.5 * self.ls(z8, proj_labels_8.long())
+                #     loss_m = loss_m0 + lamda*loss_m2 + lamda*loss_m4 + lamda*loss_m8 + bdlosss
 
                 if self.ARCH["train"]["aux_loss"]:
                     [output, z2, z4, z8] = model(in_vol)
@@ -431,12 +432,12 @@ class Trainer():
 
             optimizer.zero_grad()
 
-#             if self.n_gpus > 1:
-#                 idx = torch.ones(self.n_gpus).cuda()
-#                 loss_m.backward(idx)
-#             else:
-#                 loss_m.backward()
-#             optimizer.step()
+            # if self.n_gpus > 1:
+            #     idx = torch.ones(self.n_gpus).cuda()
+            #     loss_m.backward(idx)
+            # else:
+            #     loss_m.backward()
+            # optimizer.step()
 
             scaler.scale(loss_m).backward()
             scaler.step(optimizer)
@@ -457,6 +458,11 @@ class Trainer():
             bd.update(bdlosss.item(), in_vol.size(0))
 
             # measure elapsed time
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            res = time.time() - start
+            train_time.append(res)
+            start = time.time()
             self.batch_time_t.update(time.time() - end)
             end = time.time()
 
@@ -508,7 +514,8 @@ class Trainer():
                     estim=self.calculate_estimate(epoch, i)))
             # step scheduler
             scheduler.step()
-#         scheduler.step()
+        # scheduler.step()
+        print("Mean CNN training time:{}\t std:{}".format(np.mean(train_time), np.std(train_time)))
         return acc.avg, iou.avg, losses.avg
 
     def validate(self, val_loader, model, criterion, evaluator, class_func, color_fn, save_scans):
@@ -518,6 +525,7 @@ class Trainer():
         acc = AverageMeter()
         iou = AverageMeter()
         rand_imgs = []
+        validation_time = []
 
         # switch to evaluate mode
         model.eval()
@@ -536,11 +544,18 @@ class Trainer():
                 if self.gpu:
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
 
+                start = time.time()
                 # compute output
                 if self.ARCH["train"]["aux_loss"]:
                     [output, z2, z4, z8] = model(in_vol)
                 else:
                     output = model(in_vol)
+                # measure elapsed time
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                res = time.time() - start
+                validation_time.append(res)
+                start = time.time()
 
                 log_out = torch.log(output.clamp(min=1e-8))
                 jacc = self.ls(output, proj_labels)
@@ -579,7 +594,8 @@ class Trainer():
             jaccard, class_jaccard = evaluator.getIoU()
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
-
+            # print the results
+            print("Mean CNN inference time:{}\t std:{}".format(np.mean(validation_time), np.std(validation_time)))
             print('Validation set:\n'
                   'Time avg per batch {batch_time.avg:.3f}\n'
                   'Loss avg {loss.avg:.4f}\n'
