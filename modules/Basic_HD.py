@@ -147,7 +147,7 @@ class BasicHD():
 
                 # samples_hv = self.model.encode(proj_in, self.mask) # (bsz*size, hd_dim)
                 start = time.time()
-                samples_hv = self.model.encode(proj_in, self.mask)
+                samples_hv, _ = self.model.encode(proj_in, self.mask)
                 samples_hv = samples_hv.to(model.classify_weights.dtype)
 
                 # samples_hv = samples_hv.float()
@@ -203,11 +203,12 @@ class BasicHD():
                     #     unproj_range = unproj_range.cuda()
                 start = time.time()
                 model.classify.weight[:] = F.normalize(model.classify_weights)
-                predictions, samples_hv = model(proj_in, True)
+                predictions, samples_hv, indices = model(proj_in, True, 0.05)
                 argmax = predictions.argmax(dim=1) # (bsz*size, 1)
                 # #proj_labels shape: torch.Size([1, 64, 512])
                 proj_labels = proj_labels.view(-1)  # shape: (btsz*64*512, 1) 
                 proj_labels = proj_labels.to(self.device)
+                proj_labels = proj_labels[indices]  # map to the sampled hypervectors
 
                 is_wrong = proj_labels != argmax
                 if is_wrong.sum().item() == 0:
@@ -262,7 +263,7 @@ class BasicHD():
                     #     unproj_range = unproj_range.cuda()
                 start = time.time()
                 # print("proj_in shape: ", proj_in.shape) #torch.Size([1, 5, 64, 512])
-                predictions, _ = model(proj_in, True)
+                predictions, _, _ = model(proj_in, True)
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 res = time.time() - start

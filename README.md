@@ -83,6 +83,9 @@ Used the
     `python train.py -d /mnt/data/semantickitti -ac config/arch/senet-512.yml -n senet-512 -l pretrain0_4 -t 0,1,2,3,4`
 
     `python train.py -d /mnt/data/semantickitti -ac config/arch/senet-512.yml -n senet-512 -l retrain5_10 -p pretrain0_4/senet-512 -t 5,6,7,9,10`
+
+    `python train.py -d /mnt/data/semantickitti -ac config/arch/senet-512.yml -n senet-512 -l retrain56 -p /root/main/CENET/pretrain012347910/senet-512 -t 5,6`
+
     ```
     python train.py 
       -d <dataset_path> 
@@ -103,6 +106,8 @@ Used the
 - Online learning:
 
   `python main.py -d /mnt/data/semantickitti -l your_predictions_path -m pretrain0_4/senet-512 -t 5,6,7,9,10`
+
+  `python main.py -d /mnt/data/semantickitti -l ./temp_prediction -m /root/main/CENET/pretrain012347910/senet-512 -t 5,6 > ./retrain56_Conv.log 2>&1`
 
   ```
   python main.py 

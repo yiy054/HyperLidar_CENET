@@ -94,7 +94,7 @@ class Model(nn.Module):
         # print(self.classify_weights.shape)  # size num_class x HD dim
 
 
-    def encode(self, x, mask=None):
+    def encode(self, x, mask=None, PERCENTAGE=None):
         if mask is None:
             mask = torch.ones(self.hd_dim, device=self.device).type(torch.bool)
         # print("x.shape", x.shape)  # torch.Size([1, 5, 64, 512])
@@ -108,6 +108,13 @@ class Model(nn.Module):
         x = x.reshape(-1, 128)     # shape: (1*64*512, 128) = (32768, 128)
         # sample_hv = torch.zeros((x.shape[0], self.hd_dim), device=self.device)
         # print("x.shape", x.shape)  # torch.Size([32768, 128])
+        if PERCENTAGE is not None:
+            num_samples = int(x.shape[0] * PERCENTAGE)
+            indices = torch.randperm(x.shape[0], device=x.device)[:num_samples]
+            x = x[indices]  # shape: (~PERCENTAGE * 32768, 128)
+        else:
+            indices = torch.arange(x.shape[0], device=x.device)  # use all data
+
         sample_hv = torch.zeros((x.shape[0], self.hd_dim), device=self.device, dtype=x.dtype)
 
         if self.hd_encoder == 'rp':
@@ -129,14 +136,14 @@ class Model(nn.Module):
 
         sample_hv[:, mask] = functional.hard_quantize(sample_hv[:, mask])
         # print("sample_hv.shape", sample_hv.shape)  # (bsz*size, 1000)
-        return sample_hv
+        return sample_hv, indices
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, PERCENTAGE=None):
         if mask is None:
             mask = torch.ones(self.hd_dim, device=self.device).type(torch.bool)
 
         # Get logits output
-        enc = self.encode(x, mask)
+        enc, indices = self.encode(x, mask, PERCENTAGE)
         # Compute the cosine distance between normalized hypervectors
         if enc.dtype != self.classify.weight.dtype:
             self.classify = self.classify.to(enc.dtype)
@@ -145,7 +152,7 @@ class Model(nn.Module):
         #logits = torch.div(logits, self.temperature)
         #softmax_logits = F.log_softmax(logits, dim=1)
 
-        return logits, enc # enc is still hd_dim, but some elements are 0
+        return logits, enc, indices # enc is still hd_dim, but some elements are 0
 
     def extract_class_hv(self, mask=None):
         if mask is None:
