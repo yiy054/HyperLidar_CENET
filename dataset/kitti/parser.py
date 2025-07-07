@@ -121,22 +121,25 @@ class SemanticKitti(Dataset):
     self.label_files = []
 
     # fill in with names, checking that all sequences are complete
+    print("sequences: ", self.sequences)
     for seq in self.sequences:
       # to string
       seq = '{0:02d}'.format(int(seq))
+      # seq = '{0:04d}'.format(int(seq))
 
       print("parsing seq {}".format(seq))
 
       # get paths for each
       scan_path = os.path.join(self.root, seq, "velodyne")
       label_path = os.path.join(self.root, seq, "labels")
+      # print(f"scan_path: {scan_path}")
 
       # get files
       scan_files = [os.path.join(dp, f) for dp, dn, fn in os.walk(
           os.path.expanduser(scan_path)) for f in fn if is_scan(f)]
       label_files = [os.path.join(dp, f) for dp, dn, fn in os.walk(
           os.path.expanduser(label_path)) for f in fn if is_label(f)]
-
+      print("Found {} scans in sequence {}".format(len(scan_files), seq))
       # check all scans have labels
       if self.gt:
         assert(len(scan_files) == len(label_files))
@@ -256,6 +259,11 @@ class SemanticKitti(Dataset):
     path_name = path_split[-1].replace(".bin", ".label")
 
     # return
+
+    #debug
+    #unique_labels = torch.unique(proj_labels)
+    #print(f"[DEBUG] Sample {index} → unique labels: {unique_labels.tolist()}")
+
     return proj, proj_mask, proj_labels, unproj_labels, path_seq, path_name, proj_x, proj_y, proj_range, unproj_range, proj_xyz, unproj_xyz, proj_remission, unproj_remissions, unproj_n_points
 
   def __len__(self):

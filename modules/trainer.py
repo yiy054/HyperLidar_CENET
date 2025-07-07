@@ -439,12 +439,24 @@ class Trainer():
             #     loss_m.backward()
             # optimizer.step()
 
+            '''
+
             scaler.scale(loss_m).backward()
             scaler.step(optimizer)
             scaler.update()
 
             # measure accuracy and record loss
             loss = loss_m.mean()
+            '''
+            loss = loss_m.mean()  # 🔄 先转成 scalar
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+
+
+
             with torch.no_grad():
                 evaluator.reset()
                 argmax = output.argmax(dim=1)

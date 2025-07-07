@@ -42,7 +42,7 @@ class BasicHD():
         self.parser = Parser(root=self.datadir,
                                         train_sequences=self.DATA["split"]["train"],
                                         valid_sequences=self.DATA["split"]["valid"],
-                                        test_sequences=self.DATA["split"]["test"],
+                                        test_sequences=None,
                                         labels=self.DATA["labels"],
                                         color_map=self.DATA["color_map"],
                                         learning_map=self.DATA["learning_map"],
@@ -97,7 +97,7 @@ class BasicHD():
                 print("Ignoring class ", i, " in IoU evaluation")
         self.evaluator = iouEval(self.parser.get_n_classes(),
                                  self.device, self.ignore_class)
-        for e in range(1, 2):
+        for e in range(1, 3):
             time1 = time.time()
             self.train(self.parser.get_train_set(), self.model, self.logger)
             time2 = time.time()
@@ -128,6 +128,7 @@ class BasicHD():
             cur_class = -1
             self.mask = None
             train_time = []
+            self.is_wrong_list = [None] * len(train_loader)  # store the wrong classification for each batch
             for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(train_loader, desc="Training")):
                 # print(labels.detach().cpu().tolist())
                 # print(images.shape, labels.shape)
@@ -147,7 +148,7 @@ class BasicHD():
 
                 # samples_hv = self.model.encode(proj_in, self.mask) # (bsz*size, hd_dim)
                 start = time.time()
-                samples_hv, _ = self.model.encode(proj_in, self.mask)
+                samples_hv, _, _ = self.model.encode(proj_in, self.mask)
                 samples_hv = samples_hv.to(model.classify_weights.dtype)
 
                 # samples_hv = samples_hv.float()
@@ -160,7 +161,6 @@ class BasicHD():
                 #     model.classify_weights[proj_labels[i]] += samples_hv[i]
                 #     model.classify_sample_cnt[proj_labels[i]] += 1
                 
-                # Quick version - not sure if this is correct yet
                 model.classify_weights.index_add_(0, proj_labels, samples_hv)
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
@@ -168,7 +168,57 @@ class BasicHD():
                 train_time.append(res)
                 start = time.time()
 
+                predictions =self.model.get_predictions(samples_hv)
+                # print("predictions: ", predictions) #torch.Size([32768, 20])
+                argmax = predictions.argmax(dim=1) # (bsz*size, 1)
+                # self.is_wrong_list[i] = proj_labels != argmax
+
+                is_wrong = proj_labels != argmax
+                proj_labels = proj_labels[is_wrong]
+                argmax = argmax[is_wrong]
+                samples_hv = samples_hv[is_wrong]
+                samples_hv = samples_hv.to(model.classify_weights.dtype)
+
+                # # Pick the loss by the wrong
+                # self.is_wrong_list[i] = proj_labels != argmax
+                # loss = nn.CrossEntropyLoss(weight=self.loss_w.to(self.device))(predictions, proj_labels)
+                # self.is_wrong_list[i] *= loss
+
+                # Pick the loss by the Wy^X - WyX
+                # Compute dot products
+                # true_scores = torch.sum(model.classify_weights[proj_labels] * samples_hv, dim=1)      # shape: [wrong_size]
+                # wrong_scores = torch.sum(model.classify_weights[argmax] * samples_hv, dim=1) # shape: [wrong_size]
+                true_scores = predictions[is_wrong, proj_labels]  # shape: [wrong_size]
+                wrong_scores = predictions[is_wrong, argmax]  # shape: [wrong_size]
+                # # losses = wrong_scores - true_scores  # shape: [wrong_size]
+                losses = wrong_scores - true_scores  # shape: [wrong_size]
+                # predictions 100:C
+                # is_wrong 100:1 -> 
+                # predictions[is_wrong]  50:C
+                # proj_labels[is_wrong] 50:1
+
+                # losses = true_scores - wrong_scores          # shape: [wrong_size]
+                # if losses.sum().item() < 0:
+                # print("Warning: negative losses detected, this is not expected")
+                # print("proj_labels: ", proj_labels)
+                # print("argmax: ", argmax)
+                # print("samples_hv: ", samples_hv)
+                # print("true_scores: ", true_scores)
+                # print("wrong_scores: ", wrong_scores)
+                # print("losses: ", losses)
+                # print("Check the is_wrong shape", is_wrong.shape)
+                # print("Check the losses shape", losses.shape)
+                # print("Check the self.is_wrong_list[i] shape", self.is_wrong_list[i].shape)
+                # assert self.is_wrong_list[i].shape == is_wrong.shape
+                # Initialize if needed — make sure it's a FloatTensor
+                if self.is_wrong_list[i] is None or self.is_wrong_list[i].shape != is_wrong.shape:
+                    self.is_wrong_list[i] = torch.zeros_like(is_wrong, dtype=losses.dtype)
+                self.is_wrong_list[i][is_wrong] = losses
+                # print(losses.min(), losses.max())
+
+
             model.classify.weight[:] = F.normalize(model.classify_weights)
+            print("sum of is_wrong_list: ", sum([x.sum().item() for x in self.is_wrong_list if x is not None]))
             print("Mean HDC training time:{}\t std:{}".format(np.mean(train_time), np.std(train_time)))
             # print("Finish one batch, update classify weights")
     
@@ -203,7 +253,7 @@ class BasicHD():
                     #     unproj_range = unproj_range.cuda()
                 start = time.time()
                 model.classify.weight[:] = F.normalize(model.classify_weights)
-                predictions, samples_hv, indices = model(proj_in, True, 0.05)
+                predictions, samples_hv, indices, self.is_wrong_list[i] = model(proj_in, True, None, self.is_wrong_list[i])
                 argmax = predictions.argmax(dim=1) # (bsz*size, 1)
                 # #proj_labels shape: torch.Size([1, 64, 512])
                 proj_labels = proj_labels.view(-1)  # shape: (btsz*64*512, 1) 
@@ -211,6 +261,8 @@ class BasicHD():
                 proj_labels = proj_labels[indices]  # map to the sampled hypervectors
 
                 is_wrong = proj_labels != argmax
+                # self.is_wrong_list[i][indices[is_wrong]] = True
+                
                 if is_wrong.sum().item() == 0:
                     continue
 
@@ -220,10 +272,36 @@ class BasicHD():
                 argmax = argmax[is_wrong]
                 samples_hv = samples_hv[is_wrong]
                 samples_hv = samples_hv.to(model.classify_weights.dtype)
+                # n
+                # Y(c) = a(hd*c)x(hd) + b
+                # a (c*hd)[prj_labedls] -> n*1*hd
+                # x = n*hd
+                # Y = n * (sum(hd))
+                # true_scores = torch.sum(model.classify_weights[proj_labels] * samples_hv, dim=1)      # shape: [wrong_size]
+                # wrong_scores = torch.sum(model.classify_weights[argmax] * samples_hv, dim=1) # shape: [wrong_size]
+                true_scores = predictions[is_wrong, proj_labels]  # shape: [wrong_size]
+                wrong_scores = predictions[is_wrong, argmax]  # shape: [wrong_size
+                losses = wrong_scores - true_scores  # shape: [wrong_size]
+                if losses.sum().item() < 0:
+                    print("Warning: negative losses detected, this is not expected")
+                    print("proj_labels: ", proj_labels)
+                    print("argmax: ", argmax)
+                    print("samples_hv: ", samples_hv)
+                    print("true_scores: ", true_scores)
+                    print("wrong_scores: ", wrong_scores)
+                    print("losses: ", losses)
+
+                # losses = true_scores - wrong_scores          # shape: [wrong_size]
+                # print(losses.min(), losses.max())
+                # self.is_wrong_list[i][is_wrong] = losses
+                wrong_indices_within_selected = is_wrong.nonzero(as_tuple=False).squeeze()
+                actual_wrong_indices = indices[wrong_indices_within_selected]
+                self.is_wrong_list[i][actual_wrong_indices] = losses.to(self.is_wrong_list[i].dtype)
 
                 model.classify_weights.index_add_(0, proj_labels, samples_hv)
                 model.classify_weights.index_add_(0, argmax, -samples_hv)
                 # model.classify.weight[:] = F.normalize(model.classify_weights)
+
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 res = time.time() - start
@@ -232,6 +310,7 @@ class BasicHD():
 
                 # print("Finish one batch, update classify weights")
             print("total_miss: ", total_miss)
+            print("sum of is_wrong_list: ", sum([x.sum().item() for x in self.is_wrong_list if x is not None]))
             print("Mean HDC retraining time:{}\t std:{}".format(np.mean(retrain_time), np.std(retrain_time)))
 
     def validate(self, val_loader, model, evaluator):  # task_list
@@ -244,6 +323,7 @@ class BasicHD():
         rand_imgs = []
         evaluator.reset()
         validation_time = []
+        class_func=self.parser.get_xentropy_class_string,
         with torch.no_grad():
             for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(val_loader, desc="Validation")):
                 # p_x = p_x[0, :npoints]
@@ -254,6 +334,8 @@ class BasicHD():
                 path_name = path_name[0]
                 B, C, H, W = proj_in.shape[0], proj_in.shape[1], proj_in.shape[2], proj_in.shape[3]
 
+                # print("labels import correct: ", proj_labels) #torch.Size([1, 64, 512])
+
                 if self.gpu:
                     proj_in = proj_in.cuda()
                     # p_x = p_x.cuda()
@@ -263,7 +345,7 @@ class BasicHD():
                     #     unproj_range = unproj_range.cuda()
                 start = time.time()
                 # print("proj_in shape: ", proj_in.shape) #torch.Size([1, 5, 64, 512])
-                predictions, _, _ = model(proj_in, True)
+                predictions, _, _, _ = model(proj_in, True)
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 res = time.time() - start
@@ -279,7 +361,10 @@ class BasicHD():
                 argmax = argmax.squeeze(0) 
                 # print("argmax shape: ", argmax.shape) #torch.Size([1, 64, 512])
                 proj_labels = proj_labels.to(self.device)
-                
+                # print("proj_labels shape: ", proj_labels.shape) #torch.Size([1, 64, 512])
+                # print("argmax shape: ", argmax.shape) #torch.Size([64, 512])
+                # print("proj_labels: ", proj_labels)
+                # print("argmax: ", argmax)
                 evaluator.addBatch(argmax, proj_labels)
 
                 # if torch.cuda.is_available():
@@ -326,5 +411,6 @@ class BasicHD():
                                                 jac=jaccs,
                                                 wces=wces,
                                                 acc=acc, iou=iou))
-
+        
+        print('Class Jaccard: ', class_jaccard)
         return iou.avg

@@ -65,6 +65,7 @@ if __name__ == '__main__':
         print("Opening data config file from %s" % FLAGS.model)
         # DATA = yaml.safe_load(open(FLAGS.model + "/data_cfg.yaml", 'r'))
         DATA = yaml.safe_load(open("config/labels/semantic-kitti.yaml", 'r'))
+        # DATA = yaml.safe_load(open("config/labels/nuscenes.yaml", 'r'))
     except Exception as e:
         print(e)
         print("Error opening data yaml file.")

@@ -28,11 +28,15 @@ class Model(nn.Module):
             torch.nn.Module.dump_patches = True
             if self.ARCH["train"]["pipeline"] == "hardnet":
                 from modules.network.HarDNet import HarDNet
-                self.net = HarDNet(self.num_classes, self.ARCH["train"]["aux_loss"])
+                # 20 is the self.num_classes but setup as 20 from the semantic-kitti.yaml
+                # Under nusceneces, it is 17 classes but still setup as 20
+                self.net = HarDNet(20, self.ARCH["train"]["aux_loss"])
 
             if self.ARCH["train"]["pipeline"] == "res":
                 from modules.network.ResNet import ResNet_34
-                self.net = ResNet_34(self.num_classes, self.ARCH["train"]["aux_loss"])
+                # 20 is the self.num_classes but setup as 20 from the semantic-kitti.yaml
+                # Under nusceneces, it is 17 classes but still setup as 20
+                self.net = ResNet_34(20, self.ARCH["train"]["aux_loss"])
 
                 def convert_relu_to_softplus(model, act):
                     for child_name, child in model.named_children():
@@ -94,7 +98,7 @@ class Model(nn.Module):
         # print(self.classify_weights.shape)  # size num_class x HD dim
 
 
-    def encode(self, x, mask=None, PERCENTAGE=None):
+    def encode(self, x, mask=None, PERCENTAGE=None, is_wrong=None):
         if mask is None:
             mask = torch.ones(self.hd_dim, device=self.device).type(torch.bool)
         # print("x.shape", x.shape)  # torch.Size([1, 5, 64, 512])
@@ -109,12 +113,61 @@ class Model(nn.Module):
         # sample_hv = torch.zeros((x.shape[0], self.hd_dim), device=self.device)
         # print("x.shape", x.shape)  # torch.Size([32768, 128])
         if PERCENTAGE is not None:
-            num_samples = int(x.shape[0] * PERCENTAGE)
-            indices = torch.randperm(x.shape[0], device=x.device)[:num_samples]
-            x = x[indices]  # shape: (~PERCENTAGE * 32768, 128)
-        else:
-            indices = torch.arange(x.shape[0], device=x.device)  # use all data
+            # # Pick by the wrong and keep the PERCENTAGE
+            # wrong_indices = torch.nonzero(is_wrong, as_tuple=False).squeeze()
+            # num_samples = int(x.shape[0] * PERCENTAGE)  # Calculate the number of samples to select
+            # # print("num_samples", num_samples)  # e.g., 32768 * 0.05 = 1638
+            # # print("wrong_indices", wrong_indices.shape)
+            # # print("is_wrong", is_wrong.shape)  # e.g., torch.Size([32768])
 
+            # if wrong_indices.numel() >= num_samples:
+            #     # If there are enough wrong samples, randomly select from them
+            #     selected_indices = wrong_indices[torch.randperm(wrong_indices.shape[0], device=x.device)[:num_samples]]
+            #     is_wrong_left = is_wrong.clone()
+            #     is_wrong_left[selected_indices] = False # Mark the selected indices as used
+            # else:
+            #     # If there are not enough wrong samples, fill the rest with random samples
+            #     non_wrong_indices = torch.nonzero(~is_wrong, as_tuple=False).squeeze()
+            #     remaining = num_samples - wrong_indices.numel()
+            #     fill_indices = non_wrong_indices[torch.randperm(non_wrong_indices.shape[0], device=x.device)[:remaining]]
+
+            #     selected_indices = torch.cat([wrong_indices, fill_indices], dim=0)
+            #     is_wrong_left = is_wrong.clone()
+            #     is_wrong_left[selected_indices] = False # Mark the selected indices as used
+
+            # selected_indices, _ = selected_indices.sort()  # Optional: sort to preserve order
+            # x = x[selected_indices]  # shape: (~PERCENTAGE * 32768, 128)
+
+            # Pick by loss: 
+            num_samples = int(x.shape[0] * PERCENTAGE //2)
+            sorted_loss, sorted_indices = torch.sort(is_wrong, descending=True)
+            top_indices = sorted_indices[:num_samples]
+
+            all_indices = torch.arange(is_wrong.shape[0], device=x.device)
+            temp = torch.ones_like(is_wrong, dtype=torch.bool)
+            temp[top_indices] = False
+            remaining_indices = all_indices[temp]
+
+            remaining = num_samples
+            if remaining_indices.numel() >= remaining:
+                random_fill_indices = remaining_indices[torch.randperm(remaining_indices.shape[0])[:remaining]]
+            else:
+                # If not enough remaining, take all of them
+                random_fill_indices = remaining_indices
+            
+            selected_indices = torch.cat([top_indices, random_fill_indices], dim=0)
+            is_wrong[selected_indices] = 0 # Mark the selected indices as used
+
+            # Get top losses and their indices (descending sort)
+            # sorted_loss, sorted_indices = torch.sort(is_wrong, descending=True)
+            # selected_indices = sorted_indices[:num_samples]  # pick top N
+            # is_wrong[selected_indices] = 0.0
+
+            # Filter your data
+            x = x[selected_indices]
+
+        else:
+            selected_indices = torch.arange(x.shape[0], device=x.device)  # use all data
         sample_hv = torch.zeros((x.shape[0], self.hd_dim), device=self.device, dtype=x.dtype)
 
         if self.hd_encoder == 'rp':
@@ -136,14 +189,14 @@ class Model(nn.Module):
 
         sample_hv[:, mask] = functional.hard_quantize(sample_hv[:, mask])
         # print("sample_hv.shape", sample_hv.shape)  # (bsz*size, 1000)
-        return sample_hv, indices
+        return sample_hv, selected_indices, is_wrong
 
-    def forward(self, x, mask=None, PERCENTAGE=None):
+    def forward(self, x, mask=None, PERCENTAGE=None, is_wrong=None):
         if mask is None:
             mask = torch.ones(self.hd_dim, device=self.device).type(torch.bool)
 
         # Get logits output
-        enc, indices = self.encode(x, mask, PERCENTAGE)
+        enc, indices, is_wrong_left = self.encode(x, mask, PERCENTAGE, is_wrong)
         # Compute the cosine distance between normalized hypervectors
         if enc.dtype != self.classify.weight.dtype:
             self.classify = self.classify.to(enc.dtype)
@@ -152,7 +205,13 @@ class Model(nn.Module):
         #logits = torch.div(logits, self.temperature)
         #softmax_logits = F.log_softmax(logits, dim=1)
 
-        return logits, enc, indices # enc is still hd_dim, but some elements are 0
+        return logits, F.normalize(enc), indices, is_wrong_left # enc is still hd_dim, but some elements are 0
+    def get_predictions(self, enc):
+        # Compute the cosine distance between normalized hypervectors
+        if enc.dtype != self.classify.weight.dtype:
+            self.classify = self.classify.to(enc.dtype)
+        logits = self.classify(F.normalize(enc))
+        return logits
 
     def extract_class_hv(self, mask=None):
         if mask is None:
