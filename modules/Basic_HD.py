@@ -36,7 +36,7 @@ class BasicHD():
         self.datadir = datadir
         self.logdir = logdir
         self.modeldir = modeldir
-        self.epochs = 10
+        self.epochs = 20
 
         from dataset.kitti.parser import Parser
         self.parser = Parser(root=self.datadir,
@@ -97,13 +97,13 @@ class BasicHD():
                 print("Ignoring class ", i, " in IoU evaluation")
         self.evaluator = iouEval(self.parser.get_n_classes(),
                                  self.device, self.ignore_class)
-        for e in range(1, 3):
+        for e in range(1, 2):
             time1 = time.time()
             self.train(self.parser.get_train_set(), self.model, self.logger)
             time2 = time.time()
             print('train epoch {}, total time {:.2f}'.format(e, time2 - time1))
-            acc = self.validate(self.parser.get_valid_set(), self.model, self.evaluator)
-            print('Stream final acc: {}'.format(acc))
+            # acc = self.validate(self.parser.get_valid_set(), self.model, self.evaluator)
+            # print('Stream final acc: {}'.format(acc))
         for epoch in range(1, self.epochs + 1):
             # train for one epoch
             time1 = time.time()
@@ -211,9 +211,11 @@ class BasicHD():
                 # print("Check the self.is_wrong_list[i] shape", self.is_wrong_list[i].shape)
                 # assert self.is_wrong_list[i].shape == is_wrong.shape
                 # Initialize if needed — make sure it's a FloatTensor
-                if self.is_wrong_list[i] is None or self.is_wrong_list[i].shape != is_wrong.shape:
-                    self.is_wrong_list[i] = torch.zeros_like(is_wrong, dtype=losses.dtype)
-                self.is_wrong_list[i][is_wrong] = losses
+                # if self.is_wrong_list[i] is None or self.is_wrong_list[i].shape != is_wrong.shape:
+                #     self.is_wrong_list[i] = torch.zeros_like(is_wrong, dtype=losses.dtype)
+                # self.is_wrong_list[i][is_wrong] = losses
+                # print("is_wrong shape: ", is_wrong.shape)
+                self.is_wrong_list[i] = is_wrong
                 # print(losses.min(), losses.max())
 
 
@@ -232,7 +234,6 @@ class BasicHD():
             # for idx, (images, labels) in enumerate(train_loader):
             idx = 0  # batch index
             cur_class = -1
-            self.mask = None
             total_miss = 0
             retrain_time = []
             for i, (proj_in, proj_mask, proj_labels, unproj_labels, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(tqdm(train_loader, desc="Retraining")):
@@ -253,7 +254,8 @@ class BasicHD():
                     #     unproj_range = unproj_range.cuda()
                 start = time.time()
                 model.classify.weight[:] = F.normalize(model.classify_weights)
-                predictions, samples_hv, indices, self.is_wrong_list[i] = model(proj_in, True, None, self.is_wrong_list[i])
+                # print("Number of wrongs:", self.is_wrong_list[i].sum().item())
+                predictions, samples_hv, indices, self.is_wrong_list[i] = model(proj_in, self.mask, None, self.is_wrong_list[i])
                 argmax = predictions.argmax(dim=1) # (bsz*size, 1)
                 # #proj_labels shape: torch.Size([1, 64, 512])
                 proj_labels = proj_labels.view(-1)  # shape: (btsz*64*512, 1) 
@@ -296,9 +298,22 @@ class BasicHD():
                 # self.is_wrong_list[i][is_wrong] = losses
                 wrong_indices_within_selected = is_wrong.nonzero(as_tuple=False).squeeze()
                 actual_wrong_indices = indices[wrong_indices_within_selected]
-                self.is_wrong_list[i][actual_wrong_indices] = losses.to(self.is_wrong_list[i].dtype)
+                # self.is_wrong_list[i][actual_wrong_indices] = losses.to(self.is_wrong_list[i].dtype)
+                # print("actual_wrong_indices: ", actual_wrong_indices.shape)
+                # print("wrong_indices_within_selected: ", wrong_indices_within_selected.shape)
+                # print("is_wrong: ", is_wrong.shape)
+                # print("self.is_wrong_list[i]: ", self.is_wrong_list[i].shape)
+                # print("indices: ", indices.shape)
+                # # print("is_wrong_list number of wrong: ", self.is_wrong_list[i].nonzero(as_tuple=False).squeeze().sum().item())
+                # print("Number of wrongs:", self.is_wrong_list[i].sum().item())
+                self.is_wrong_list[i][actual_wrong_indices] = True
+                # print("is_wrong_list number of wrong: ", self.is_wrong_list[i].nonzero(as_tuple=False).squeeze().sum().item())
+                # print("Number of wrongs:", self.is_wrong_list[i].sum().item())
+
 
                 model.classify_weights.index_add_(0, proj_labels, samples_hv)
+                model.classify_weights.index_add_(0, proj_labels, samples_hv)
+                model.classify_weights.index_add_(0, argmax, -samples_hv)
                 model.classify_weights.index_add_(0, argmax, -samples_hv)
                 # model.classify.weight[:] = F.normalize(model.classify_weights)
 
@@ -315,6 +330,7 @@ class BasicHD():
 
     def validate(self, val_loader, model, evaluator):  # task_list
         """Validation, evaluate linear classification accuracy and kNN accuracy"""
+        # return 0
         losses = AverageMeter()
         jaccs = AverageMeter()
         wces = AverageMeter()
@@ -345,7 +361,7 @@ class BasicHD():
                     #     unproj_range = unproj_range.cuda()
                 start = time.time()
                 # print("proj_in shape: ", proj_in.shape) #torch.Size([1, 5, 64, 512])
-                predictions, _, _, _ = model(proj_in, True)
+                predictions, _, _, _ = model(proj_in, self.mask)
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 res = time.time() - start

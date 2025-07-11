@@ -114,49 +114,55 @@ class Model(nn.Module):
         # print("x.shape", x.shape)  # torch.Size([32768, 128])
         if PERCENTAGE is not None:
             # # Pick by the wrong and keep the PERCENTAGE
-            # wrong_indices = torch.nonzero(is_wrong, as_tuple=False).squeeze()
-            # num_samples = int(x.shape[0] * PERCENTAGE)  # Calculate the number of samples to select
+            wrong_indices = torch.nonzero(is_wrong, as_tuple=False).squeeze()
+            num_samples = int(x.shape[0] * PERCENTAGE)  # Calculate the number of samples to select
+            # selected_indices = torch.randperm(x.shape[0], device=x.device)[:num_samples]
+            # print("selected_indices", selected_indices.shape)  # e.g., torch.Size([1638])
+            # print("x", x.shape)  # e.g., torch.Size([1638])
+            # print("x[selected_indices]", x[selected_indices[0]])  # e.g., torch.Size([1638, 128])
+
             # # print("num_samples", num_samples)  # e.g., 32768 * 0.05 = 1638
             # # print("wrong_indices", wrong_indices.shape)
             # # print("is_wrong", is_wrong.shape)  # e.g., torch.Size([32768])
 
-            # if wrong_indices.numel() >= num_samples:
-            #     # If there are enough wrong samples, randomly select from them
-            #     selected_indices = wrong_indices[torch.randperm(wrong_indices.shape[0], device=x.device)[:num_samples]]
-            #     is_wrong_left = is_wrong.clone()
-            #     is_wrong_left[selected_indices] = False # Mark the selected indices as used
-            # else:
-            #     # If there are not enough wrong samples, fill the rest with random samples
-            #     non_wrong_indices = torch.nonzero(~is_wrong, as_tuple=False).squeeze()
-            #     remaining = num_samples - wrong_indices.numel()
-            #     fill_indices = non_wrong_indices[torch.randperm(non_wrong_indices.shape[0], device=x.device)[:remaining]]
+            if wrong_indices.numel() >= num_samples:
+                # If there are enough wrong samples, randomly select from them
+                selected_indices = wrong_indices[torch.randperm(wrong_indices.shape[0], device=x.device)[:num_samples]]
+                is_wrong[selected_indices] = False # Mark the selected indices as used
+            else:
+                # If there are not enough wrong samples, fill the rest with random samples
+                non_wrong_indices = torch.nonzero(~is_wrong, as_tuple=False).squeeze()
+                remaining = num_samples - wrong_indices.numel()
+                fill_indices = non_wrong_indices[torch.randperm(non_wrong_indices.shape[0], device=x.device)[:remaining]]
 
-            #     selected_indices = torch.cat([wrong_indices, fill_indices], dim=0)
-            #     is_wrong_left = is_wrong.clone()
-            #     is_wrong_left[selected_indices] = False # Mark the selected indices as used
+                selected_indices = torch.cat([wrong_indices, fill_indices], dim=0)
+                is_wrong[selected_indices] = False # Mark the selected indices as used
 
-            # selected_indices, _ = selected_indices.sort()  # Optional: sort to preserve order
-            # x = x[selected_indices]  # shape: (~PERCENTAGE * 32768, 128)
+            selected_indices, _ = selected_indices.sort()  # Optional: sort to preserve order
+            # print("selected_indices", selected_indices.shape)  # e.g., torch.Size([1638])
+            x = x[selected_indices]  # shape: (~PERCENTAGE * 32768, 128)
+            assert x.shape[0] == num_samples, f"Expected {num_samples} samples, got {x.shape[0]}"
 
             # Pick by loss: 
-            num_samples = int(x.shape[0] * PERCENTAGE //2)
-            sorted_loss, sorted_indices = torch.sort(is_wrong, descending=True)
-            top_indices = sorted_indices[:num_samples]
+            # num_samples = int(x.shape[0] * PERCENTAGE)
+            # num_wrongdata = 0
+            # sorted_loss, sorted_indices = torch.sort(is_wrong, descending=True)
+            # top_indices = sorted_indices[:num_wrongdata]
 
-            all_indices = torch.arange(is_wrong.shape[0], device=x.device)
-            temp = torch.ones_like(is_wrong, dtype=torch.bool)
-            temp[top_indices] = False
-            remaining_indices = all_indices[temp]
+            # all_indices = torch.arange(is_wrong.shape[0], device=x.device)
+            # temp = torch.ones_like(is_wrong, dtype=torch.bool)
+            # temp[top_indices] = False
+            # remaining_indices = all_indices[temp]
 
-            remaining = num_samples
-            if remaining_indices.numel() >= remaining:
-                random_fill_indices = remaining_indices[torch.randperm(remaining_indices.shape[0])[:remaining]]
-            else:
-                # If not enough remaining, take all of them
-                random_fill_indices = remaining_indices
+            # remaining = num_samples - num_wrongdata
+            # if remaining_indices.numel() >= remaining:
+            #     random_fill_indices = remaining_indices[torch.randperm(remaining_indices.shape[0])[:remaining]]
+            # else:
+            #     # If not enough remaining, take all of them
+            #     random_fill_indices = remaining_indices
             
-            selected_indices = torch.cat([top_indices, random_fill_indices], dim=0)
-            is_wrong[selected_indices] = 0 # Mark the selected indices as used
+            # selected_indices = torch.cat([top_indices, random_fill_indices], dim=0)
+            # is_wrong[selected_indices] = 0 # Mark the selected indices as used
 
             # Get top losses and their indices (descending sort)
             # sorted_loss, sorted_indices = torch.sort(is_wrong, descending=True)
@@ -164,7 +170,9 @@ class Model(nn.Module):
             # is_wrong[selected_indices] = 0.0
 
             # Filter your data
-            x = x[selected_indices]
+            # x = x[selected_indices]
+            # print("x after selection", x.shape)  # e.g., torch.Size([1638, 128])
+            # print("x", x[0])  # e.g., torch.Size([1638])
 
         else:
             selected_indices = torch.arange(x.shape[0], device=x.device)  # use all data
@@ -206,6 +214,7 @@ class Model(nn.Module):
         #softmax_logits = F.log_softmax(logits, dim=1)
 
         return logits, F.normalize(enc), indices, is_wrong_left # enc is still hd_dim, but some elements are 0
+
     def get_predictions(self, enc):
         # Compute the cosine distance between normalized hypervectors
         if enc.dtype != self.classify.weight.dtype:
